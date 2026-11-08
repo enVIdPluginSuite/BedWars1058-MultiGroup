@@ -10,7 +10,7 @@ BedWars1058 ties every arena to exactly one group (`group:` in `plugins/BedWars1
 * Editing the map itself (`/bw setupArena lighthouse`) updates every variant: they inherit the arena's settings and use its map.
 
 ## Install
-1. Put `BedWars1058-MultiGroup-1.0.0.jar` in `plugins/` next to BedWars1058 (required).
+1. Put `BedWars1058-MultiGroup-1.2.0.jar` in `plugins/` next to BedWars1058 (required).
 2. Recommended: BedWars1058-MapLoader **3.6.0** or newer (see below).
 3. Start the server once, then e.g.:
    ```
@@ -65,14 +65,19 @@ Names are compared as words (split on punctuation and camelCase, normalised thro
 
 Below `matching.min-score` (150) the group plays the base configuration (`fallback-to-base`). Ties go to the word that comes first in the group name and are logged; `/bwmg match <map> <group>` shows all scores, `/bwmg fix` pins a choice.
 
-## Turning existing copies into configurations
-If you already copied `lighthouse` to `lighthouse_doubles` for another group:
-```
-/bw disableArena lighthouse_doubles
-/bwmg import lighthouse lighthouse_doubles                 # preview
-/bwmg import lighthouse lighthouse_doubles delete-map confirm
-```
-Only what differs from `lighthouse` is stored as the configuration (named after the copy's group), the copy's group is added to the map, its arena file goes to `backups/arenas/`, and with `delete-map` its world is deleted through the active restore adapter (MapLoader keeps a backup according to its `backups-to-keep`). Without `delete-map` the copy's map stays where it is.
+## Existing copies are merged automatically
+Servers that already copied a map per game mode (`lighthouse`, `lighthouse_doubles`, `lighthouse-solorush`...) are moved to the new system on the first start.
+
+**Detection.** A copied map keeps its coordinates, so two arenas of one map mention the same locations (team spawns, beds, shops, generators, lobby). The plugin compares those, not names or world files, so it finds copies however they are called. The original is the arena whose name is the common beginning of the others' (`lighthouse`), preferring one that already has a map file.
+
+**Merge** (`duplicates.auto-merge`, on by default; only at startup, before BedWars1058 reads its arenas). For every copy that has the same layout (>= 0.8 alike), a different group and a recognisable original:
+* only what differs from the original is stored as a configuration in `maps/<original>.yml` (named after the copy's group; the copy's name is kept as an alias)
+* the copy's group becomes a variant of the original
+* the copy's arena file is moved to `backups/arenas/`; nothing is deleted. A plain world folder that would block the new variant is moved to `backups/worlds/`
+
+**Not merged, only logged** (see `/bwmg duplicates`): copies in the *same* group as the original (a variant cannot replace them), arenas 0.5-0.8 alike (probably another layout of the map, e.g. fewer teams), and groups of arenas where no original can be told apart. Merge those by hand with `/bwmg merge <original> <copy>`.
+
+**Freeing the space.** The copies' worlds are still stored after the merge. `/bwmg cleanup` lists them and `/bwmg cleanup confirm` deletes them through the active restore adapter (MapLoader keeps a backup according to its `backups-to-keep`). `/bwmg merge ... delete-map confirm` merges and deletes in one step.
 
 ## Commands (`/bwmg`, permission `bw1058multigroup.admin`)
 | Command | Purpose |
@@ -86,10 +91,19 @@ Only what differs from `lighthouse` is stored as the configuration (named after 
 | `set <map> <config\|shared> <path> <value>` | set an arena setting (YAML value: `2`, `true`, `[a, b]`) |
 | `setloc <map> <config\|shared> <path> [center] [add]` | store your position in BedWars1058's arena format (`add` appends to a list such as `generator.Diamond`) |
 | `unset`, `drop <map> <config> <path>` | remove an override / remove a setting of the arena |
-| `import <map> <arena> [config] [delete-map] [confirm]` | absorb an existing copy (above) |
+| `duplicates` | arenas that are copies of one map, and why they are or are not merged |
+| `merge all [delete-maps] [confirm]` | merge every clear duplicate (preview without `confirm`) |
+| `merge <map> <copy> [config] [delete-map] [confirm]` | merge one copy (`import` is an alias) |
+| `cleanup [confirm]` | delete the worlds of copies that were already merged |
 | `reload` | apply the map files |
 
 `/bwmg reload` registers new variants immediately, restarts idle variants whose configuration changed (and winds down removed ones); variants in a game, or parked by MapLoader, pick changes up after their next game. `/bw setupArena` and `/bw deleteArena` are blocked for variants.
 
-## Build
-`gradle shadowJar` (Kotlin 2.2.21, JDK 17+). The BedWars1058 API resolves from `-PbedwarsApiJar=<jar>`, then `./libs/*.jar`, then the andrei1058 Maven repository. Output: `build/libs/BedWars1058-MultiGroup-1.0.0.jar`.
+## Compatibility
+Spigot/Paper 1.8 - 26.x (compiled against the 1.8.8 API; the 1.13+ void generator is loaded by name), Java 11+ bytecode like BedWars1058 and BedWars1058-MapLoader. Kotlin is shaded and relocated (`dev.bwmultigroup.libs.kotlin`), so it never clashes with MapLoader's.
+
+## Developer note
+This plugin is coded with AI assistance and architected completely by me. Regardless, use at your own risk.
+
+## License
+This plugin is under the MIT License, check the [License](LICENSE) file for more details.

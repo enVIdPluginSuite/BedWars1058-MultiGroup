@@ -85,7 +85,8 @@ class MultiGroupAdapter(
                 }
             } else {
                 worlds.unloadAndDelete(worldName)
-                later(80L) { reenter(name) }
+                // with several instances per arena another game may already be waiting for players
+                if (api.arenaUtil.canAutoScale(name)) later(80L) { reenter(name) }
             }
         }
     }
