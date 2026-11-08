@@ -39,6 +39,18 @@ matching:
     trios: [trio, triple, triples, 3v3, 3s, threes]
     squads: [squad, quad, quads, 4v4, 4s, fours]
 
+duplicates:
+  # Arenas that are copies of one map (same coordinates, different group - e.g. lighthouse and lighthouse_doubles)
+  # are merged into the original at startup: the copy's differences become a configuration in maps/<original>.yml,
+  # its group becomes a variant, and its arena file is moved to backups/arenas/ (nothing is deleted).
+  # The copies' worlds stay where they are until you run /bwmg cleanup. Use /bwmg duplicates to see what was found.
+  auto-merge: true
+  # How alike two arenas must be (0.3 - 1.0 share of identical locations) to count as the same map for auto-merge.
+  # Arenas between 0.5 and this value are reported but never merged on their own (another layout of the map).
+  min-similarity: 0.8
+  # Arenas with fewer locations than this are never compared.
+  min-locations: 4
+
 # Add groups used by variants to BedWars1058's "arenaGroups" (config.yml) when they are missing there.
 # Without that, BedWars1058 puts such arenas into the group "Default".
 register-missing-groups: true

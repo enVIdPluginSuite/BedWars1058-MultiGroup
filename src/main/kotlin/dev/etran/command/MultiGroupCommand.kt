@@ -1,12 +1,12 @@
 package dev.etran.command
 
+import dev.etran.Merger
 import dev.etran.MultiGroupPlugin
 import dev.etran.bedwars.YamlTrees
 import dev.etran.core.ConfigMatcher
 import dev.etran.core.MapDefinition
 import dev.etran.core.TreeMerge
 import dev.etran.core.VariantPlanner
-import dev.etran.world.FileOps
 import org.bukkit.ChatColor
 import org.bukkit.command.Command
 import org.bukkit.command.CommandExecutor
@@ -14,9 +14,6 @@ import org.bukkit.command.CommandSender
 import org.bukkit.command.TabCompleter
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /** `/bwmg` - inspect and edit which groups a map is played in and with which configuration. */
@@ -51,7 +48,9 @@ class MultiGroupCommand(private val plugin: MultiGroupPlugin) : CommandExecutor,
                 }
                 "unset" -> need(sender, rest, 3, "unset <map> <config|shared> <path>") { unset(sender, it[0], it[1], it[2]) }
                 "drop" -> need(sender, rest, 3, "drop <map> <config> <path>") { drop(sender, it[0], it[1], it[2]) }
-                "import" -> need(sender, rest, 2, "import <map> <arena> [config] [delete-map] [confirm]") { importArena(sender, it) }
+                "duplicates", "dupes" -> duplicates(sender)
+                "merge", "import" -> merge(sender, rest)
+                "cleanup" -> cleanup(sender, rest)
                 else -> help(sender, label)
             }
         } catch (ex: Exception) {
@@ -81,7 +80,10 @@ class MultiGroupCommand(private val plugin: MultiGroupPlugin) : CommandExecutor,
             "setloc <map> <config|shared> <path> [center] [add]" to "store your position (e.g. Team.Red.Spawn)",
             "unset <map> <config|shared> <path>" to "remove an override again",
             "drop <map> <config> <path>" to "remove a setting of the base arena (e.g. Team.Yellow)",
-            "import <map> <arena> [config] [delete-map] [confirm]" to "turn an existing copy of a map into a configuration",
+            "duplicates" to "arenas that are copies of one map",
+            "merge all [delete-maps] [confirm]" to "turn every clear duplicate into a configuration",
+            "merge <map> <copy> [config] [delete-map] [confirm]" to "turn one copy into a configuration",
+            "cleanup [confirm]" to "delete the worlds of copies that were already merged",
             "reload" to "apply the map files",
         ).forEach { (cmd, desc) -> s.sendMessage("$y/$label $cmd $g- $desc") }
     }
@@ -174,6 +176,8 @@ class MultiGroupCommand(private val plugin: MultiGroupPlugin) : CommandExecutor,
         if (report.restarted.isNotEmpty()) s.sendMessage("${g}Restarted idle arenas: $w${report.restarted.joinToString(", ")}")
         if (report.waiting.isNotEmpty()) s.sendMessage("${g}Busy or parked, updated after their next game: $w${report.waiting.joinToString(", ")}")
         res.warnings.forEach { s.sendMessage("$y! $it") }
+        val dupes = plugin.merger.detect().clusters.sumOf { c -> c.members.count { plugin.merger.detector().isClear(c, it) } }
+        if (dupes > 0) s.sendMessage("$y$dupes duplicate arena(s) can be merged into their original map: /bwmg duplicates")
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -376,108 +380,189 @@ class MultiGroupCommand(private val plugin: MultiGroupPlugin) : CommandExecutor,
     }
 
     // ---------------------------------------------------------------------------------------------
-    // Import: an existing copy of a map becomes a configuration of the original
+    // Duplicates: copies of a map become configurations of the original
     // ---------------------------------------------------------------------------------------------
 
-    private fun importArena(s: CommandSender, args: List<String>) {
-        val base = baseArenaName(s, args[0]) ?: return
-        val dupFile = plugin.bwFiles.arenaFile(args[1])
-        if (dupFile == null) {
-            s.sendMessage("${r}There is no arena '${args[1]}'.")
+    private fun duplicates(s: CommandSender) {
+        val det = plugin.merger.detector()
+        val d = plugin.merger.detect()
+        if (d.clusters.isEmpty()) {
+            s.sendMessage("${gr}No duplicate arenas found.")
             return
         }
-        val dup = dupFile.name.removeSuffix(".yml")
-        if (dup.equals(base, ignoreCase = true)) {
-            s.sendMessage("${r}An arena cannot be imported into itself.")
+        for (c in d.clusters) {
+            if (c.base == null) {
+                s.sendMessage("$y! ${c.members.joinToString(", ") { "${it.name} (${it.group})" }}$g: ${c.note}")
+                continue
+            }
+            s.sendMessage("$a${c.base}$g (group ${c.baseGroup}):")
+            for (m in c.members) {
+                val status = when {
+                    det.isClear(c, m) -> "${gr}clear - /bwmg merge all"
+                    m.group.equals(c.baseGroup, ignoreCase = true) -> "${y}same group, not mergeable"
+                    else -> "${y}different layout? check, then /bwmg merge ${c.base} ${m.name}"
+                }
+                s.sendMessage("$g  ${w}${m.name}$g (group ${m.group}), ${Merger.percent(m.similarity)} alike: $status")
+            }
+        }
+    }
+
+    private fun merge(s: CommandSender, args: List<String>) {
+        if (args.isEmpty()) {
+            s.sendMessage("${r}Usage: /bwmg merge all [delete-maps] [confirm]  |  /bwmg merge <map> <copy> [config] [delete-map] [confirm]")
+            return
+        }
+        if (args[0].equals("all", ignoreCase = true)) mergeAll(s, args.drop(1).map { it.lowercase(Locale.ROOT) }) else mergePair(s, args)
+    }
+
+    private fun isEnabled(arena: String): Boolean {
+        val api = plugin.api ?: return false
+        return api.arenaUtil.arenas.any { it.arenaName.equals(arena, ignoreCase = true) } ||
+            api.arenaUtil.enableQueue.any { it.arenaName.equals(arena, ignoreCase = true) }
+    }
+
+    private fun mergePair(s: CommandSender, args: List<String>) {
+        if (args.size < 2) {
+            s.sendMessage("${r}Usage: /bwmg merge <map> <copy> [config] [delete-map] [confirm]")
             return
         }
         val flags = args.drop(2).map { it.lowercase(Locale.ROOT) }
         val confirm = "confirm" in flags
-        val deleteMap = "delete-map" in flags
-        val baseTree = YamlTrees.load(plugin.bwFiles.arenaFile(base)!!) ?: return s.sendMessage("${r}Could not read $base.yml.")
-        val dupTree = YamlTrees.load(dupFile) ?: return s.sendMessage("${r}Could not read ${dupFile.name}.")
-        if (plugin.bwFiles.isGenerated(dupTree)) {
-            s.sendMessage("${r}$dup is a generated variant, not a copy.")
+        val deleteMap = "delete-map" in flags || "delete-maps" in flags
+        val config = args.drop(2).firstOrNull { it.lowercase(Locale.ROOT) !in FLAGS }
+        val plan = try {
+            plugin.merger.prepare(args[0], args[1], config)
+        } catch (ex: Merger.MergeException) {
+            s.sendMessage(r + (ex.message ?: "Cannot merge."))
             return
         }
-        val group = dupTree["group"]?.toString() ?: "Default"
-        val configName = args.drop(2).firstOrNull { it.lowercase(Locale.ROOT) !in setOf("confirm", "delete-map") }
-            ?: group.lowercase(Locale.ROOT)
-
-        val replace: (String) -> Boolean = { it in plugin.settings.plan.replaceSections }
-        val cleanBase = TreeMerge.deepCopy(baseTree).also { it.remove("group"); it.remove(VariantPlanner.MARKER_SECTION) }
-        val cleanDup = TreeMerge.deepCopy(dupTree).also { it.remove("group"); it.remove(VariantPlanner.MARKER_SECTION) }
-        val diff = TreeMerge.diff(cleanBase, cleanDup, replace)
-        val existingConfig = currentDefinition(base)?.config(configName)
-        val newName = VariantPlanner(plugin.settings.matcher(), plugin.settings.plan).variantName(base, group)
-
+        describe(s, plan)
+        s.sendMessage(if (deleteMap) "${y}The world of ${plan.dup} is deleted through the restore adapter (${plugin.api?.restoreAdapter?.displayName ?: "?"})."
+        else "${g}The world of ${plan.dup} is kept (add ${y}delete-map$g to free its space, or use $y/bwmg cleanup$g later).")
         if (!confirm) {
-            s.sendMessage("$a--- import $dup into $base ---")
-            s.sendMessage("${g}Group: $w$group$g -> variant arena $y$newName")
-            s.sendMessage("${g}Configuration: $w$configName$g (${countLeaves(diff.overrides)} changed setting(s), ${diff.removals.size} removed)" +
-                if (existingConfig != null) " ${r}- exists already, pick another name" else "")
-            s.sendMessage("${g}$dup.yml is moved to plugins/${plugin.name}/backups/arenas/.")
-            s.sendMessage(if (deleteMap) "${y}The map of $dup is deleted through the restore adapter (${plugin.api?.restoreAdapter?.displayName ?: "?"})."
-            else "${g}The map of $dup is kept (add ${y}delete-map$g to free its space).")
-            s.sendMessage("${g}Run it with $y/bwmg import $base $dup $configName${if (deleteMap) " delete-map" else ""} confirm")
+            s.sendMessage("${g}Run it with $y/bwmg merge ${plan.base} ${plan.dup} ${plan.configName}${if (deleteMap) " delete-map" else ""} confirm")
             return
         }
-        if (existingConfig != null) {
-            s.sendMessage("${r}$base already has a configuration '$configName'. Give the import another name: /bwmg import $base $dup <config> confirm")
+        if (isEnabled(plan.dup)) {
+            s.sendMessage("${r}${plan.dup} is still enabled. Disable it first with /bw disableArena ${plan.dup} (after its game), then merge it.")
             return
         }
-        val api = plugin.api
-        if (api != null) {
-            val busy = api.arenaUtil.arenas.any { it.arenaName.equals(dup, ignoreCase = true) } ||
-                api.arenaUtil.enableQueue.any { it.arenaName.equals(dup, ignoreCase = true) }
-            if (busy) {
-                s.sendMessage("${r}$dup is still enabled. Disable it first with /bw disableArena $dup (after its game), then import it.")
-                return
-            }
+        val backup = plugin.merger.apply(plan)
+        s.sendMessage("${gr}Merged ${plan.dup} into ${plan.base}. Its arena file is in ${backup.path}.")
+        plugin.merger.setAsideClashingWorld(plan.variantName)?.let {
+            s.sendMessage("${y}The world folder ${plan.variantName} was moved to ${it.path}; delete it to free its space.")
         }
-
-        // 1. the configuration and the group
-        editMap(base) { tree ->
-            val list = (tree["groups"] as? List<*>)?.filterNotNull()?.map { it.toString() }?.toMutableList() ?: ArrayList()
-            if (list.none { it.equals(group, ignoreCase = true) }) list += group
-            tree["groups"] = list
-            section(tree, "configs")[configName] = linkedMapOf<String, Any?>(
-                "match" to listOf(dup), "overrides" to diff.overrides, "remove" to diff.removals,
-            )
-            section(tree, "group-configs")[group] = configName
-        }
-        // 2. the duplicate's arena file goes to the backups (it is small; nothing is lost)
-        val stamp = SimpleDateFormat("yyyyMMdd-HHmmss").format(Date())
-        val backup = File(plugin.dataFolder, "backups/arenas/$dup-$stamp.yml")
-        backup.parentFile.mkdirs()
-        if (!dupFile.renameTo(backup)) {
-            dupFile.copyTo(backup, overwrite = true)
-            dupFile.delete()
-        }
-        s.sendMessage("${gr}Imported $dup as configuration '$configName' of $base (group $group). Its arena file is in ${backup.path}.")
-
-        // 3. its map
-        val root = plugin.server.worldContainer
-        if (deleteMap) {
-            val restore = api?.restoreAdapter
-            if (restore != null) {
-                restore.deleteWorld(dup)
-                s.sendMessage("${gr}Deleted the map of $dup through ${restore.displayName}.")
-            }
-            plugin.bwFiles.cacheDir.listFiles()?.filter { it.name.equals("$dup.zip", ignoreCase = true) }?.forEach { it.delete() }
-        } else {
-            // a plain world folder with the new variant's name would block the variant's own copy: move it aside
-            val clash = File(root, newName)
-            if (clash.isDirectory && !File(clash, FileOps.MARKER).exists() && plugin.server.getWorld(newName) == null) {
-                val aside = File(plugin.dataFolder, "backups/worlds/$newName-$stamp")
-                aside.parentFile.mkdirs()
-                if (clash.renameTo(aside)) s.sendMessage("${y}The world folder $newName was moved to ${aside.path}; delete it to free its space.")
-            }
-        }
+        if (deleteMap) deleteWorldOf(s, plan.dup)
         reload(s)
     }
 
-    private fun countLeaves(t: Map<String, Any?>): Int = t.values.sumOf { if (it is Map<*, *>) countLeaves(TreeMerge.asTree(it)) else 1 }
+    private fun describe(s: CommandSender, plan: Merger.Plan) {
+        s.sendMessage("$a--- merge ${plan.dup} into ${plan.base} ---")
+        s.sendMessage("${g}Group ${w}${plan.group}$g -> variant arena $y${plan.variantName}$g, configuration $w${plan.configName}$g " +
+            "(${Merger.countLeaves(plan.diff.overrides)} changed setting(s), ${plan.diff.removals.size} removed)")
+        s.sendMessage("${g}${plan.dup}.yml is moved to plugins/${plugin.name}/backups/arenas/.")
+    }
+
+    private fun mergeAll(s: CommandSender, flags: List<String>) {
+        val confirm = "confirm" in flags
+        val deleteMaps = "delete-maps" in flags || "delete-map" in flags
+        val det = plugin.merger.detector()
+        val todo = ArrayList<Pair<String, String>>()
+        val notes = ArrayList<String>()
+        for (c in plugin.merger.detect().clusters) {
+            if (c.base == null) {
+                notes += "${c.members.joinToString(", ") { it.name }}: ${c.note}"
+                continue
+            }
+            for (m in c.members) {
+                if (det.isClear(c, m)) todo += c.base to m.name
+                else notes += "${m.name} (${Merger.percent(m.similarity)} alike ${c.base}) is not clear; /bwmg duplicates"
+            }
+        }
+        if (todo.isEmpty()) {
+            s.sendMessage("${y}No clear duplicates to merge.")
+            notes.forEach { s.sendMessage("$g- $it") }
+            return
+        }
+        var done = 0
+        for ((base, dup) in todo) {
+            val plan = try {
+                plugin.merger.prepare(base, dup)
+            } catch (ex: Merger.MergeException) {
+                s.sendMessage("$y$dup: ${ex.message}")
+                continue
+            }
+            if (!confirm) {
+                s.sendMessage("$g- ${w}$dup$g -> $a$base$g: group ${plan.group}, configuration ${plan.configName}, variant ${y}${plan.variantName}")
+                continue
+            }
+            if (isEnabled(dup)) {
+                s.sendMessage("$y$dup is still enabled: /bw disableArena $dup, then run this again.")
+                continue
+            }
+            plugin.merger.apply(plan)
+            plugin.merger.setAsideClashingWorld(plan.variantName)
+            if (deleteMaps) deleteWorldOf(s, dup)
+            s.sendMessage("${gr}Merged $dup into $base (configuration ${plan.configName}).")
+            done++
+        }
+        notes.forEach { s.sendMessage("$g- $it") }
+        if (!confirm) {
+            s.sendMessage("${g}Apply with $y/bwmg merge all${if (deleteMaps) " delete-maps" else ""} confirm$g. Arena files go to backups/.")
+        } else if (done > 0) {
+            reload(s)
+        }
+    }
+
+    /** Deletes the world called [arena] through the restore adapter that stores it (never an alias of another map). */
+    private fun deleteWorldOf(s: CommandSender, arena: String): Boolean {
+        val adapter = plugin.adapter
+        val restore = adapter?.delegate ?: plugin.api?.restoreAdapter
+        if (restore == null) {
+            s.sendMessage("${y}BedWars1058 is not running: delete the world of $arena by hand.")
+            return false
+        }
+        if (plugin.server.getWorld(arena) != null) {
+            s.sendMessage("${y}The world $arena is loaded right now; use /bwmg cleanup after it is unloaded.")
+            return false
+        }
+        if (!restore.isWorld(arena)) return false
+        restore.deleteWorld(arena)
+        plugin.bwFiles.cacheDir.listFiles()?.filter { it.name.equals("$arena.zip", ignoreCase = true) }?.forEach { it.delete() }
+        s.sendMessage("${gr}Deleted the world of $arena (${restore.displayName}).")
+        return true
+    }
+
+    /** Worlds of arenas that were merged earlier (`merged-from` in the map files) and are still stored. */
+    private fun cleanup(s: CommandSender, args: List<String>) {
+        val confirm = args.any { it.equals("confirm", ignoreCase = true) }
+        val restore = plugin.adapter?.delegate
+        if (restore == null) {
+            s.sendMessage("${r}BedWars1058 is not running yet.")
+            return
+        }
+        val leftovers = ArrayList<Pair<String, String>>() // map -> merged-from
+        for ((_, f) in plugin.maps.files()) {
+            val tree = YamlTrees.load(f) ?: continue
+            val configs = tree["configs"] as? Map<*, *> ?: continue
+            for ((_, v) in configs) {
+                val from = (v as? Map<*, *>)?.get("merged-from")?.toString() ?: continue
+                leftovers += f.name.removeSuffix(".yml") to from
+            }
+        }
+        val present = leftovers.filter { (map, dup) ->
+            !dup.equals(map, ignoreCase = true) && plugin.bwFiles.arenaFile(dup) == null && restore.isWorld(dup)
+        }
+        if (present.isEmpty()) {
+            s.sendMessage("${gr}Nothing to clean up: no stored world belongs to a merged copy.")
+            return
+        }
+        for ((map, dup) in present) {
+            if (!confirm) s.sendMessage("$g- world ${w}$dup$g (merged into $a$map$g)")
+            else deleteWorldOf(s, dup)
+        }
+        if (!confirm) s.sendMessage("${g}Delete them with $y/bwmg cleanup confirm$g. Their arenas stay in backups/arenas/; the maps live on as $a/bwmg$g configurations.")
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Helpers
@@ -554,7 +639,7 @@ class MultiGroupCommand(private val plugin: MultiGroupPlugin) : CommandExecutor,
     // ---------------------------------------------------------------------------------------------
 
     override fun onTabComplete(sender: CommandSender, command: Command, alias: String, args: Array<out String>): List<String> {
-        val subs = listOf("status", "list", "info", "match", "reload", "create", "group", "config", "fix", "set", "setloc", "unset", "drop", "import", "help")
+        val subs = listOf("status", "list", "info", "match", "reload", "create", "group", "config", "fix", "set", "setloc", "unset", "drop", "merge", "duplicates", "cleanup", "help")
         fun filter(options: Collection<String>, prefix: String) =
             options.filter { it.startsWith(prefix, ignoreCase = true) }.distinct().sorted()
 
@@ -598,17 +683,20 @@ class MultiGroupCommand(private val plugin: MultiGroupPlugin) : CommandExecutor,
                 4 -> filter(PATH_HINTS, last)
                 else -> if (sub == "setloc") filter(listOf("center", "add"), last) else emptyList()
             }
-            "import" -> when (args.size) {
-                2 -> filter(arenas, last)
-                3 -> filter(arenas.filter { !it.equals(args[1], ignoreCase = true) }, last)
+            "merge", "import" -> when {
+                args.size == 2 -> filter(arenas + "all", last)
+                args[1].equals("all", true) -> filter(listOf("delete-maps", "confirm"), last)
+                args.size == 3 -> filter(arenas.filter { !it.equals(args[1], ignoreCase = true) }, last)
                 else -> filter(listOf("delete-map", "confirm"), last)
             }
+            "cleanup" -> filter(listOf("confirm"), last)
             else -> emptyList()
         }
     }
 
     companion object {
         const val SHARED = "shared"
+        private val FLAGS = setOf("confirm", "delete-map", "delete-maps")
         private val PATH_HINTS = listOf(
             "maxInTeam", "minPlayers", "allowSpectate", "display-name", "worldBorder", "Team.", "generator.Diamond", "generator.Emerald",
             "waiting.Loc", "waiting.Pos1", "waiting.Pos2", "island-radius", "max-build-y", "y-kill-height",

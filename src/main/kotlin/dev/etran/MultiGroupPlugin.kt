@@ -41,6 +41,8 @@ class MultiGroupPlugin : JavaPlugin() {
         private set
     lateinit var bridge: MapLoaderBridge
         private set
+    lateinit var merger: Merger
+        private set
 
     /** Set once BedWars1058 is enabled and the adapter is installed. */
     var api: BedWars? = null
@@ -76,6 +78,8 @@ class MultiGroupPlugin : JavaPlugin() {
         val bw = server.pluginManager.getPlugin(BEDWARS) ?: return
         bwPlugin = bw
         bwFiles = BedWarsFiles(bw.dataFolder, logger)
+        merger = Merger(bwFiles, maps, { settings }, dataFolder, server.worldContainer, { server.getWorld(it) != null }, logger)
+        if (settings.duplicates.autoMerge) autoMergeDuplicates()
         regenerate { groups -> addGroupsOnDisk(groups) }
     }
 
@@ -169,6 +173,24 @@ class MultiGroupPlugin : JavaPlugin() {
         bridge.unregisterAliases()
         worlds?.shutdown()
         // The adapter stays installed: BedWars1058 may still disable arenas through it while the server stops.
+    }
+
+    /**
+     * Arenas that are copies of one map are folded into that map (their arena files are backed up, nothing is deleted).
+     * Only at startup: BedWars1058 has not read the arenas yet, so no running arena is affected.
+     */
+    private fun autoMergeDuplicates() {
+        try {
+            val r = merger.autoMerge()
+            r.skipped.forEach { logger.warning(it) }
+            r.needReview.forEach { logger.warning("Possible duplicate: $it") }
+            if (r.merged.isNotEmpty()) {
+                logger.info("Merged ${r.merged.size} duplicate arena(s) into their original map: ${r.merged.joinToString(", ") { it.dup }}. " +
+                    "Their worlds are still stored; free that space with /bwmg cleanup.")
+            }
+        } catch (t: Throwable) {
+            logger.log(java.util.logging.Level.WARNING, "Duplicate detection failed; continuing without it", t)
+        }
     }
 
     // ---------------------------------------------------------------------------------------------

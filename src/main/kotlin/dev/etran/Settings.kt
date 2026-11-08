@@ -14,6 +14,7 @@ data class Settings(
     val registerPerTick: Int,
     val world: WorldSettings,
     val messages: Messages,
+    val duplicates: DuplicateSettings,
     /** BedWars1058's main command and aliases (to guard `setupArena` / `deleteArena` on variants). */
     val bedwarsCommands: List<String>,
     val debug: Boolean,
@@ -23,6 +24,13 @@ data class Settings(
         val voidGenerator: Boolean,
         val keepSpawnInMemory: Boolean,
         val ioThreads: Int,
+    )
+
+    data class DuplicateSettings(
+        val autoMerge: Boolean,
+        val minSimilarity: Double,
+        val reviewSimilarity: Double,
+        val minLocations: Int,
     )
 
     data class Messages(val setupBlocked: String, val deleteBlocked: String) {
@@ -75,6 +83,14 @@ data class Settings(
                 deleteBlocked = c.getString("messages.delete-blocked", DEFAULT_DELETE_BLOCKED) ?: DEFAULT_DELETE_BLOCKED,
             )
 
+            val minSim = c.getDouble("duplicates.min-similarity", 0.8).coerceIn(0.3, 1.0)
+            val duplicates = DuplicateSettings(
+                autoMerge = c.getBoolean("duplicates.auto-merge", true),
+                minSimilarity = minSim,
+                reviewSimilarity = minOf(0.5, minSim),
+                minLocations = c.getInt("duplicates.min-locations", 4).coerceAtLeast(2),
+            )
+
             return Settings(
                 plan = plan,
                 minScore = minScore,
@@ -83,6 +99,7 @@ data class Settings(
                 registerPerTick = c.getInt("register-per-tick", 5).coerceIn(1, 100),
                 world = world,
                 messages = messages,
+                duplicates = duplicates,
                 bedwarsCommands = c.getStringList("bedwars-commands").takeIf { c.isList("bedwars-commands") } ?: listOf("bw", "bedwars"),
                 debug = c.getBoolean("debug", false),
             )

@@ -5,8 +5,8 @@ plugins {
     id("com.gradleup.shadow") version "8.3.10"
 }
 
-group = "dev.bwmultigroup"
-version = providers.gradleProperty("pluginVersion").getOrElse("1.0.0")
+group = "dev.etran"
+version = providers.gradleProperty("pluginVersion").getOrElse("1.1.0")
 
 repositories {
     mavenCentral()
