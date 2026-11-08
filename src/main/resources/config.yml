@@ -1,0 +1,68 @@
+# ===========================================================================================
+#  BedWars1058-MultiGroup  -  one map, many arena groups
+# ===========================================================================================
+#  A map is played in extra groups by listing them in   plugins/BedWars1058-MultiGroup/maps/<map>.yml
+#  (see maps/_example.yml, or use /bwmg create <map> and /bwmg group add <map> <group>).
+#  For every extra group an arena ("variant") is generated in plugins/BedWars1058/Arenas/ that uses the SAME map:
+#  no copy of the world is stored for it. Each group gets the map configuration whose name matches it best.
+#  Apply changes with /bwmg reload.
+# ===========================================================================================
+
+# Name of the generated arenas. {map} = the map's arena name, {group} = the group. Lower-cased; only a-z 0-9 _ - .
+# are kept (anything else becomes _), because newer Minecraft versions only accept those in world names.
+variant-name-pattern: "{map}-{group}"
+
+# Display name of a variant in GUIs and messages. {display} = the map's own display name, {map}, {group}, {config}.
+# A configuration can still set its own "display-name".
+display-name-format: "{display}"
+
+# Sections a configuration replaces as a whole instead of merging into the map's own settings. With "Team" here, a
+# configuration that defines 4 teams really has 4 teams, not its 4 plus the remaining teams of the original.
+replace-sections:
+  - Team
+
+# When no configuration of a map matches a group closely enough:
+#   true  = that group plays the map's own (unchanged) arena configuration
+#   false = no arena is created for that group (a warning is logged)
+fallback-to-base: true
+
+matching:
+  # Minimum score (1 - 1000) a configuration needs to be chosen. Exact name = 1000, same words = 900,
+  # every word of the configuration found in the group = 600 or more (e.g. "solo" for "SoloRush"),
+  # typos and partial names < 300. /bwmg match <map> <group> shows the scores.
+  min-score: 150
+  # Words that mean the same. The key is the canonical word. "NvNvN..." team notations are understood as well
+  # (1v1v1v1 = solo, 2v2v2v2 = doubles, 3v3v3v3 = trios, 4v4v4v4 = squads).
+  synonyms:
+    solo: [solos, single, singles, 1v1, 1s]
+    doubles: [double, duo, duos, 2v2, 2s, pair, pairs, twos]
+    trios: [trio, triple, triples, 3v3, 3s, threes]
+    squads: [squad, quad, quads, 4v4, 4s, fours]
+
+# Add groups used by variants to BedWars1058's "arenaGroups" (config.yml) when they are missing there.
+# Without that, BedWars1058 puts such arenas into the group "Default".
+register-missing-groups: true
+
+# Variant arenas registered with BedWars1058 per tick after startup / reload.
+register-per-tick: 5
+
+# BedWars1058's main command and its aliases. "/bw setupArena <variant>" and "/bw deleteArena <variant>" are blocked
+# (a variant has no map of its own: set up the map itself, and remove a group with /bwmg group remove).
+bedwars-commands: [bw, bedwars]
+
+# Only used when this plugin loads variant worlds itself (stock BedWars1058, or BedWars1058-MapLoader before 3.6.0).
+# With BedWars1058-MapLoader 3.6.0+ the variants are loaded by MapLoader with its own settings.
+world:
+  # Ignore level.dat of the map, like BedWars1058's own world restore does.
+  delete-level-dat: true
+  # Chunks that were never built come out as void instead of terrain.
+  void-generator: true
+  keep-spawn-in-memory: true
+  # Background threads that copy maps.
+  io-threads: 2
+
+messages:
+  setup-blocked: "&c{arena} is the {group} variant of the map {map}. Set up the map itself with &e/bw setupArena {map}&c; group specific settings are changed with &e/bwmg&c."
+  delete-blocked: "&c{arena} is the {group} variant of the map {map}. Remove the group with &e/bwmg group remove {map} {group}&c instead."
+
+debug: false

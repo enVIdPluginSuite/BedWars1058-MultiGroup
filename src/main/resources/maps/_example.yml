@@ -1,0 +1,64 @@
+# ===========================================================================================
+#  Example map file (ignored: files starting with _ are not loaded).
+#  Copy it to  maps/<arena>.yml  where <arena> is the BedWars1058 arena of the map, e.g. maps/lighthouse.yml
+#  or let the plugin write it: /bwmg create lighthouse
+# ===========================================================================================
+
+# Turn all variants of this map off without deleting the file.
+enabled: true
+
+# Extra groups this map is played in. The group of its own arena (Arenas/lighthouse.yml) is always played.
+# Patterns are matched against BedWars1058's arenaGroups: "*Rush" = every group ending in Rush, "*" = all groups.
+groups:
+  - Doubles
+  - SoloRush
+  - DoublesRush
+  - 4v4v4v4
+
+# Optional: decide yourself which configuration a group uses ("base" = the arena's own configuration).
+# Groups not listed here get the configuration whose name matches the group name best:
+#   Doubles     -> doubles   (exact name)
+#   SoloRush    -> rush      (shares the word "rush"; also pinned below)
+#   DoublesRush -> doubles   ("doubles" and "rush" fit equally well: the word that comes first in the group
+#                             name wins, and the tie is logged. Pin it in group-configs to decide yourself.)
+#   4v4v4v4     -> squads    (4v4v4v4 means teams of 4)
+group-configs:
+  SoloRush: rush
+
+# Applied to every variant of this map, before its configuration.
+shared:
+  allowSpectate: true
+
+configs:
+  doubles:
+    # Extra names this configuration answers to.
+    match: [duos, 2v2]
+    # Anything from the arena configuration can be overridden. Sections listed in replace-sections (Team) are
+    # replaced as a whole, everything else is merged key by key.
+    overrides:
+      maxInTeam: 2
+      minPlayers: 4
+
+  rush:
+    overrides:
+      minPlayers: 2
+      generator:
+        Diamond: []
+
+  squads:
+    overrides:
+      maxInTeam: 4
+      # A 4-team layout of the same map. Locations use BedWars1058's arena format "x,y,z,yaw,pitch" and are set
+      # in-game with:  /bwmg setloc lighthouse squads Team.Red.Spawn center
+      Team:
+        Red:
+          Color: RED
+          Spawn: "10.5,65.0,0.5,90.0,0.0"
+          Bed: "14.5,65.0,0.5,0.0,0.0"
+          Shop: "8.5,65.0,3.5,0.0,0.0"
+          Upgrade: "8.5,65.0,-2.5,0.0,0.0"
+          Iron: "12.5,65.0,0.5,0.0,0.0"
+          Gold: "12.5,65.0,0.5,0.0,0.0"
+        # ... Blue, Green, Yellow
+    # Paths removed from the arena's own configuration first.
+    remove: []

@@ -1,0 +1,24 @@
+name: BedWars1058-MultiGroup
+main: dev.etran.MultiGroupPlugin
+version: ${version}
+# Ignored by 1.8 - 1.12 servers; on 1.13+ it keeps Bukkit from applying legacy material support.
+api-version: '1.13'
+description: Play one BedWars1058 map in several arena groups, with a configuration per group and a single copy of the map.
+author: BedWars1058-MultiGroup
+# loadbefore: the variant arena files must exist (and their groups be in arenaGroups) BEFORE BedWars1058 reads them.
+# softdepend: BedWars1058-MapLoader (also loadbefore BedWars1058) must be enabled first, so the variants can be
+# registered with its map library before BedWars1058 starts.
+loadbefore: [BedWars1058]
+softdepend: [BedWars1058-MapLoader]
+
+commands:
+  bwmg:
+    description: Manage the groups and configurations of BedWars maps
+    usage: /<command> help
+    aliases: [bwmultigroup, multigroup]
+    permission: bw1058multigroup.admin
+
+permissions:
+  bw1058multigroup.admin:
+    description: Use /bwmg
+    default: op
