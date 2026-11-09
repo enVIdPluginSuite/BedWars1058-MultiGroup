@@ -127,7 +127,7 @@ class VariantWorlds(
     private fun materialize(source: Source, worldName: String, protectedNames: Set<String>, deleteLevelDat: Boolean) {
         require(SAFE_NAME.matches(worldName)) { "Illegal world name '$worldName'" }
         check(worldName.lowercase(Locale.ROOT) !in protectedNames) { "A world called '$worldName' is already loaded" }
-        val target = File(serverRoot, worldName)
+        val target = WorldLayout.worldDir(worldName, serverRoot)
         if (target.exists()) {
             check(File(target, FileOps.MARKER).exists()) {
                 "A folder called '$worldName' already exists in the server root and was not created by BedWars1058-MultiGroup; it was not touched"
@@ -144,7 +144,7 @@ class VariantWorlds(
             is Source.Zip -> FileOps.unzip(source.path, target.toPath(), skip)
         }
         if (WorldLayout.normalize(target)) debug("Converted the world layout of '$worldName' for this server version")
-        check(File(target, "region").isDirectory || File(target, "dimensions").isDirectory) {
+        check(File(target, "region").isDirectory) {
             "The map at $source does not contain a world (no region folder)"
         }
     }
@@ -223,7 +223,7 @@ class VariantWorlds(
 
     /** Deletes a copy (only if it carries our marker) unless a newer copy has been made since [notAfter]. */
     private fun deleteCopy(worldName: String, notAfter: Long? = null) {
-        val dir = File(serverRoot, worldName)
+        val dir = WorldLayout.worldDir(worldName, serverRoot)
         val marker = File(dir, FileOps.MARKER)
         if (!marker.exists()) return
         if (notAfter != null) {
@@ -251,7 +251,7 @@ class VariantWorlds(
     fun sweep(): Int {
         val loaded = Bukkit.getWorlds().map { it.name.lowercase(Locale.ROOT) }.toSet()
         var n = 0
-        for (d in serverRoot.listFiles() ?: emptyArray()) {
+        for (d in WorldLayout.runtimeContainers(serverRoot).flatMap { it.listFiles()?.toList() ?: emptyList() }) {
             if (!d.isDirectory || d.name.lowercase(Locale.ROOT) in loaded) continue
             if (!File(d, FileOps.MARKER).exists()) continue
             try {
@@ -266,7 +266,7 @@ class VariantWorlds(
     }
 
     fun isOwned(worldName: String): Boolean =
-        worldName.lowercase(Locale.ROOT) in owned || File(File(serverRoot, worldName), FileOps.MARKER).exists()
+        worldName.lowercase(Locale.ROOT) in owned || File(WorldLayout.worldDir(worldName, serverRoot), FileOps.MARKER).exists()
 
     fun shutdown() {
         io.shutdown()
