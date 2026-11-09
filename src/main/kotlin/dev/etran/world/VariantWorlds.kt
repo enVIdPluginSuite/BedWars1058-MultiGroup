@@ -143,6 +143,7 @@ class VariantWorlds(
             is Source.Folder -> FileOps.copyDirectory(source.path, target.toPath(), skip)
             is Source.Zip -> FileOps.unzip(source.path, target.toPath(), skip)
         }
+        if (WorldLayout.normalize(target)) debug("Converted the world layout of '$worldName' for this server version")
         check(File(target, "region").isDirectory || File(target, "dimensions").isDirectory) {
             "The map at $source does not contain a world (no region folder)"
         }

@@ -10,7 +10,7 @@ BedWars1058 ties every arena to exactly one group (`group:` in `plugins/BedWars1
 * Editing the map itself (`/bw setupArena lighthouse`) updates every variant: they inherit the arena's settings and use its map.
 
 ## Install
-1. Put `BedWars1058-MultiGroup-1.2.0.jar` in `plugins/` next to BedWars1058 (required).
+1. Put `BedWars1058-MultiGroup-1.2.1.jar` in `plugins/` next to BedWars1058 (required).
 2. Recommended: BedWars1058-MapLoader **3.6.0** or newer (see below).
 3. Start the server once, then e.g.:
    ```
@@ -101,7 +101,6 @@ Servers that already copied a map per game mode (`lighthouse`, `lighthouse_doubl
 
 ## Compatibility
 Spigot/Paper 1.8 - 26.x (compiled against the 1.8.8 API; the 1.13+ void generator is loaded by name), Java 11+ bytecode like BedWars1058 and BedWars1058-MapLoader. Kotlin is shaded and relocated (`dev.bwmultigroup.libs.kotlin`), so it never clashes with MapLoader's.
-
 ## Developer note
 This plugin is coded with AI assistance and architected completely by me. Regardless, use at your own risk.
 
