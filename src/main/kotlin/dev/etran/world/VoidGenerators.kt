@@ -22,7 +22,8 @@ object VoidGenerators {
         } catch (ex: ClassNotFoundException) {
             false
         }
-        val className = if (modernApi) "dev.etran.world.ModernVoidGenerator" else "dev.etran.world.LegacyVoidGenerator"
+        val pkg = VoidGenerators::class.java.name.substringBeforeLast('.')
+        val className = if (modernApi) "$pkg.ModernVoidGenerator" else "$pkg.LegacyVoidGenerator"
         return try {
             Class.forName(className).getDeclaredConstructor().newInstance() as ChunkGenerator
         } catch (t: Throwable) {
